@@ -53,8 +53,17 @@ class TextureHandler {
     preview_frame_height_ = height;
   }
 
-  // Sets software mirror state.
-  void SetMirrorPreviewState(bool mirror) { mirror_preview_ = mirror; }
+  // Sets software mirror state. [mirror] is the user-requested state (also stored for record).
+  void SetMirrorPreviewState(bool mirror) {
+    mirror_desired_ = mirror;
+    mirror_preview_ = mirror;
+  }
+
+  // Sets only the software mirror (used when source mirror is active to avoid double mirror).
+  void SetMirrorPreviewStateSoftwareOnly(bool mirror) { mirror_preview_ = mirror; }
+
+  // Returns user-requested mirror state (for record stream and logic).
+  bool GetMirrorPreviewState() const { return mirror_desired_; }
 
  private:
   // Informs flutter texture registrar of updated texture.
@@ -70,6 +79,7 @@ class TextureHandler {
   }
 
   bool mirror_preview_ = true;
+  bool mirror_desired_ = true;
   int64_t texture_id_ = -1;
   uint32_t bytes_per_pixel_ = 4;
   uint32_t source_buffer_size_ = 0;

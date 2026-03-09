@@ -344,25 +344,10 @@ bool CaptureControllerImpl::InitCaptureDevice(
 }
 
 void CaptureControllerImpl::SetMirrorPreviewState(bool mirror) {
-  bool use_source_mirror = false;
-  if (capture_engine_ && IsInitialized()) {
-    ComPtr<IMFCaptureSource> source;
-    HRESULT hr = capture_engine_->GetSource(&source);
-    if (SUCCEEDED(hr) && source) {
-      const BOOL mirror_state = mirror ? TRUE : FALSE;
-      HRESULT hr_preview = source->SetMirrorState(
-          (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW,
-          mirror_state);
-      source->SetMirrorState(
-          (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_RECORD,
-          mirror_state);
-      if (SUCCEEDED(hr_preview)) {
-        use_source_mirror = true;
-      }
-    }
-  }
+  // 仅使用 TextureHandler 软件镜像，不调用 IMFCaptureSource::SetMirrorState，
+  // 避免部分设备/驱动在 GetSource 或 SetMirrorState 时崩溃。
   if (texture_handler_) {
-    texture_handler_->SetMirrorPreviewState(use_source_mirror ? false : mirror);
+    texture_handler_->SetMirrorPreviewState(mirror);
   }
 }
 
@@ -567,6 +552,8 @@ void CaptureControllerImpl::StartRecord(const std::string& file_path) {
         "Recording cannot be started. Previous recording must be stopped "
         "first.");
   }
+
+  // 暂不在此处调用 SetMirrorState(录像流)，部分设备会崩溃；录像与预览镜像一致需后续用其他方式实现。
 
   // Check MF_CAPTURE_ENGINE_RECORD_STARTED event handling for response
   // process.
@@ -805,23 +792,8 @@ void CaptureControllerImpl::OnCaptureEngineInitialized(
 
     // Create texture handler and register new texture.
     texture_handler_ = std::make_unique<TextureHandler>(texture_registrar_);
-    // 默认镜像 true：优先用采集源 SetMirrorState，不支持则用 TextureHandler 软件镜像
-    bool mirror_default = true;
-    ComPtr<IMFCaptureSource> source;
-    if (SUCCEEDED(capture_engine_->GetSource(&source)) && source) {
-      if (SUCCEEDED(source->SetMirrorState(
-              (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW,
-              mirror_default ? TRUE : FALSE))) {
-        source->SetMirrorState(
-            (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_RECORD,
-            mirror_default ? TRUE : FALSE);
-        texture_handler_->SetMirrorPreviewState(false);
-      } else {
-        texture_handler_->SetMirrorPreviewState(mirror_default);
-      }
-    } else {
-      texture_handler_->SetMirrorPreviewState(mirror_default);
-    }
+    // 默认镜像 true；采集源镜像仅在 SetMirrorPreviewState 被调用时设置，避免初始化时 GetSource/SetMirrorState 导致崩溃
+    texture_handler_->SetMirrorPreviewState(true);
 
     int64_t texture_id = texture_handler_->RegisterTexture();
     if (texture_id >= 0) {
