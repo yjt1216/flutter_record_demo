@@ -10,6 +10,7 @@
 
 #include <cassert>
 #include <chrono>
+#include <cstdio>
 
 #include "com_heap_ptr.h"
 #include "photo_handler.h"
@@ -406,26 +407,54 @@ uint32_t CaptureControllerImpl::GetMaxPreviewHeight() const {
   }
 }
 
+namespace {
+std::string HResultToString(HRESULT hr) {
+  _com_error err(hr);
+  char hex_buf[32] = {0};
+  std::snprintf(hex_buf, sizeof(hex_buf), "0x%08lX",
+                static_cast<unsigned long>(hr));
+  std::string msg = hex_buf;
+  msg.append(" (");
+  msg.append(Utf8FromUtf16(std::wstring(err.ErrorMessage())));
+  msg.append(")");
+  return msg;
+}
+
+void DebugLog(const std::string& msg) {
+  std::string with_newline = msg;
+  with_newline.append("\n");
+  OutputDebugStringA(with_newline.c_str());
+  std::fprintf(stderr, "%s", with_newline.c_str());
+  std::fflush(stderr);
+}
+}  // namespace
+
 // Finds best media type for given source stream index and max height;
 bool FindBestMediaType(DWORD source_stream_index, IMFCaptureSource* source,
                        IMFMediaType** target_media_type, uint32_t max_height,
                        uint32_t* target_frame_width,
                        uint32_t* target_frame_height,
                        float minimum_accepted_framerate = 15.f,
-                       float target_framerate = 0.f) {
+                       float target_framerate = 0.f,
+                       HRESULT* last_enumeration_hr = nullptr,
+                       int* enumerated_type_count = nullptr) {
   assert(source);
   ComPtr<IMFMediaType> media_type;
 
   uint32_t best_width = 0;
   uint32_t best_height = 0;
   float best_framerate = 0.f;
+  HRESULT last_hr = S_OK;
+  int type_count = 0;
 
   // Loop native media types.
   for (int i = 0;; i++) {
-    if (FAILED(source->GetAvailableDeviceMediaType(
-            source_stream_index, i, media_type.GetAddressOf()))) {
+    last_hr = source->GetAvailableDeviceMediaType(source_stream_index, i,
+                                                  media_type.GetAddressOf());
+    if (FAILED(last_hr)) {
       break;
     }
+    type_count++;
 
     uint32_t frame_rate_numerator, frame_rate_denominator;
     if (FAILED(MFGetAttributeRatio(media_type.Get(), MF_MT_FRAME_RATE,
@@ -479,6 +508,12 @@ bool FindBestMediaType(DWORD source_stream_index, IMFCaptureSource* source,
     *target_frame_height = best_height;
   }
 
+  if (last_enumeration_hr) {
+    *last_enumeration_hr = last_hr;
+  }
+  if (enumerated_type_count) {
+    *enumerated_type_count = type_count;
+  }
   return *target_media_type != nullptr;
 }
 
@@ -505,20 +540,58 @@ HRESULT CaptureControllerImpl::FindBaseMediaTypesForSource(
   }
 
   // Find base media type for previewing.
-  if (!FindBestMediaType(
-          (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW,
-          source, base_preview_media_type_.GetAddressOf(),
-          GetMaxPreviewHeight(), &preview_frame_width_,
-          &preview_frame_height_, 15.0f, target_fps)) {
-    return E_FAIL;
+  const DWORD kPreferredPreviewStream =
+      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW;
+  HRESULT preview_enum_hr = S_OK;
+  int preview_enum_count = 0;
+  if (!FindBestMediaType(kPreferredPreviewStream, source,
+                         base_preview_media_type_.GetAddressOf(),
+                         GetMaxPreviewHeight(), &preview_frame_width_,
+                         &preview_frame_height_, 15.0f, target_fps,
+                         &preview_enum_hr, &preview_enum_count)) {
+    // 某些设备/驱动对 “preferred stream” 常量不支持，回退到 stream 0。
+    DebugLog("FindBestMediaType(preview) failed. preferred_stream=" +
+             std::to_string(kPreferredPreviewStream) +
+             ", enumerated_types=" + std::to_string(preview_enum_count) +
+             ", last_hr=" + HResultToString(preview_enum_hr));
+    preview_enum_hr = S_OK;
+    preview_enum_count = 0;
+    if (!FindBestMediaType(0, source, base_preview_media_type_.GetAddressOf(),
+                           GetMaxPreviewHeight(), &preview_frame_width_,
+                           &preview_frame_height_, 15.0f, target_fps,
+                           &preview_enum_hr, &preview_enum_count)) {
+      DebugLog("FindBestMediaType(preview) failed on fallback stream=0. "
+               "enumerated_types=" +
+               std::to_string(preview_enum_count) +
+               ", last_hr=" + HResultToString(preview_enum_hr));
+      return FAILED(preview_enum_hr) ? preview_enum_hr : E_FAIL;
+    }
   }
 
   // Find base media type for record and photo capture.
-  if (!FindBestMediaType(
-          (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_RECORD,
-          source, base_capture_media_type_.GetAddressOf(), 0xffffffff, nullptr,
-          nullptr, 15.0f, target_fps)) {
-    return E_FAIL;
+  const DWORD kPreferredRecordStream =
+      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_RECORD;
+  HRESULT record_enum_hr = S_OK;
+  int record_enum_count = 0;
+  if (!FindBestMediaType(kPreferredRecordStream, source,
+                         base_capture_media_type_.GetAddressOf(), 0xffffffff,
+                         nullptr, nullptr, 15.0f, target_fps, &record_enum_hr,
+                         &record_enum_count)) {
+    DebugLog("FindBestMediaType(record) failed. preferred_stream=" +
+             std::to_string(kPreferredRecordStream) +
+             ", enumerated_types=" + std::to_string(record_enum_count) +
+             ", last_hr=" + HResultToString(record_enum_hr));
+    record_enum_hr = S_OK;
+    record_enum_count = 0;
+    if (!FindBestMediaType(0, source, base_capture_media_type_.GetAddressOf(),
+                           0xffffffff, nullptr, nullptr, 15.0f, target_fps,
+                           &record_enum_hr, &record_enum_count)) {
+      DebugLog("FindBestMediaType(record) failed on fallback stream=0. "
+               "enumerated_types=" +
+               std::to_string(record_enum_count) +
+               ", last_hr=" + HResultToString(record_enum_hr));
+      return FAILED(record_enum_hr) ? record_enum_hr : E_FAIL;
+    }
   }
 
   return S_OK;
@@ -596,7 +669,9 @@ void CaptureControllerImpl::StartPreview() {
   assert(capture_engine_);
   assert(texture_handler_);
 
+  DebugLog("StartPreview: enter");
   if (!IsInitialized() || !texture_handler_) {
+    DebugLog("StartPreview: not initialized or missing texture handler");
     return OnPreviewStarted(CameraResult::kError,
                             "Camera not initialized. Camera should be "
                             "disposed and reinitialized.");
@@ -607,37 +682,60 @@ void CaptureControllerImpl::StartPreview() {
   ComPtr<IMFCaptureSource> source;
   hr = capture_engine_->GetSource(&source);
   if (FAILED(hr)) {
+    DebugLog("StartPreview: GetSource failed. hr=" + HResultToString(hr));
     return OnPreviewStarted(GetCameraResult(hr),
-                            "Failed to get capture engine source");
+                            "Failed to get capture engine source. hr=" +
+                                HResultToString(hr));
   }
 
   if (!base_preview_media_type_) {
     // Enumerates mediatypes and finds media type for video capture.
+    DebugLog("StartPreview: base_preview_media_type_ not set; enumerating media types...");
     hr = FindBaseMediaTypesForSource(source.Get());
     if (FAILED(hr)) {
+      DebugLog("StartPreview: FindBaseMediaTypesForSource failed. hr=" +
+               HResultToString(hr));
       return OnPreviewStarted(GetCameraResult(hr),
-                              "Failed to initialize video preview");
+                              "Failed to initialize video preview. hr=" +
+                                  HResultToString(hr));
     }
   }
 
-  hr = source->SetCurrentDeviceMediaType(
-      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW,
-      base_preview_media_type_.Get());
+  const DWORD kPreferredPreviewStream =
+      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW;
+  hr = source->SetCurrentDeviceMediaType(kPreferredPreviewStream,
+                                        base_preview_media_type_.Get());
   if (FAILED(hr)) {
-    return OnPreviewStarted(GetCameraResult(hr),
-                            "Failed to set video preview output format");
+    DebugLog("StartPreview: SetCurrentDeviceMediaType(preview) failed. "
+             "preferred_stream=" +
+             std::to_string(kPreferredPreviewStream) +
+             ", hr=" + HResultToString(hr) + ". Falling back to stream=0.");
+    hr = source->SetCurrentDeviceMediaType(0, base_preview_media_type_.Get());
+    if (FAILED(hr)) {
+      DebugLog("StartPreview: SetCurrentDeviceMediaType(preview) failed on "
+               "fallback stream=0. hr=" +
+               HResultToString(hr));
+      return OnPreviewStarted(GetCameraResult(hr),
+                              "Failed to set video preview output format. hr=" +
+                                  HResultToString(hr));
+    }
   }
 
   texture_handler_->UpdateTextureSize(preview_frame_width_,
                                       preview_frame_height_);
+  DebugLog("StartPreview: selected preview size=" +
+           std::to_string(preview_frame_width_) + "x" +
+           std::to_string(preview_frame_height_));
 
   // TODO(loic-sharma): This does not handle duplicate calls properly.
   // See: https://github.com/flutter/flutter/issues/108404
   if (!preview_handler_) {
     preview_handler_ = std::make_unique<PreviewHandler>();
   } else if (preview_handler_->IsInitialized()) {
+    DebugLog("StartPreview: preview already initialized; returning success");
     return OnPreviewStarted(CameraResult::kSuccess, "");
   } else {
+    DebugLog("StartPreview: preview handler exists but not initialized");
     return OnPreviewStarted(CameraResult::kError, "Preview already exists");
   }
 
@@ -650,9 +748,13 @@ void CaptureControllerImpl::StartPreview() {
   if (FAILED(hr)) {
     // Destroy preview handler on error cases to make sure state is resetted.
     preview_handler_ = nullptr;
+    DebugLog("StartPreview: PreviewHandler::StartPreview failed. hr=" +
+             HResultToString(hr));
     return OnPreviewStarted(GetCameraResult(hr),
-                            "Failed to start video preview");
+                            "Failed to start video preview. hr=" +
+                                HResultToString(hr));
   }
+  DebugLog("StartPreview: StartPreview requested; waiting for first frame/event");
 }
 
 // Stops preview. Called by destructor
@@ -823,6 +925,11 @@ void CaptureControllerImpl::OnCaptureEngineError(CameraResult result,
 // in error cases.
 void CaptureControllerImpl::OnPreviewStarted(CameraResult result,
                                              const std::string& error) {
+  if (result == CameraResult::kSuccess) {
+    DebugLog("OnPreviewStarted: success");
+  } else {
+    DebugLog("OnPreviewStarted: failed. error=" + error);
+  }
   if (preview_handler_ && result == CameraResult::kSuccess) {
     preview_handler_->OnPreviewStarted();
   } else {
@@ -912,6 +1019,9 @@ void CaptureControllerImpl::UpdateCaptureTime(uint64_t capture_time_us) {
   }
 
   last_capture_time_us_ = capture_time_us;
+  if (preview_handler_ && preview_handler_->IsStarting()) {
+    DebugLog("UpdateCaptureTime: first frame arrived; marking preview started");
+  }
   if (record_handler_ && record_handler_->CanStop()) {
     record_handler_->UpdateRecordingTime(capture_time_us);
   }

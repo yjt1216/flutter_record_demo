@@ -94,12 +94,17 @@ HRESULT PreviewHandler::InitPreviewSink(
   }
 
   DWORD preview_sink_stream_index;
-  hr = preview_sink_->AddStream(
-      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW,
-      preview_media_type.Get(), nullptr, &preview_sink_stream_index);
-
+  const DWORD kPreferredPreviewStream =
+      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW;
+  hr = preview_sink_->AddStream(kPreferredPreviewStream, preview_media_type.Get(),
+                               nullptr, &preview_sink_stream_index);
   if (FAILED(hr)) {
-    return hr;
+    // 某些设备/驱动不支持 “preferred stream” 常量，回退到 stream 0。
+    hr = preview_sink_->AddStream(0, preview_media_type.Get(), nullptr,
+                                  &preview_sink_stream_index);
+    if (FAILED(hr)) {
+      return hr;
+    }
   }
 
   hr = preview_sink_->SetSampleCallback(preview_sink_stream_index,
