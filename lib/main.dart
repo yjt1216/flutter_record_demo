@@ -2,6 +2,7 @@
 import 'package:camera_recorder/camera_recorder.dart';
 import 'package:flutter/material.dart';
 import 'pages/audio_player_page.dart';
+import 'pages/mirror_after_record_page.dart';
 
 void main() {
   // 注册 camera_windows_recorder 插件
@@ -294,6 +295,17 @@ class _MyHomePageState extends State<MyHomePage> {
                 );
               },
               child: const Text('打开音频播放（assets/common/countdown10s.mp3）'),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const MirrorAfterRecordPage(),
+                  ),
+                );
+              },
+              child: const Text('录后镜像录制（camera + FFmpeg）'),
             ),
             const SizedBox(height: 12),
             Row(

@@ -533,11 +533,17 @@ void CaptureControllerImpl::StartRecord(const std::string& file_path) {
                            "disposed and reinitialized.");
   }
 
-  HRESULT hr = S_OK;
+  if (!base_preview_media_type_ && !base_capture_media_type_) {
+    HRESULT hr = FindBaseMediaTypes();
+    if (FAILED(hr)) {
+      return OnRecordStarted(GetCameraResult(hr),
+                             "Failed to initialize video recording");
+    }
+  }
 
+  // Windows 上不再用预览帧管线录像；始终用引擎录像，录像结束后由 Flutter 用本地 FFmpeg 做 hflip 转码。
   if (!base_capture_media_type_) {
-    // Enumerates mediatypes and finds media type for video capture.
-    hr = FindBaseMediaTypes();
+    HRESULT hr = FindBaseMediaTypes();
     if (FAILED(hr)) {
       return OnRecordStarted(GetCameraResult(hr),
                              "Failed to initialize video recording");
@@ -553,14 +559,9 @@ void CaptureControllerImpl::StartRecord(const std::string& file_path) {
         "first.");
   }
 
-  // 暂不在此处调用 SetMirrorState(录像流)，部分设备会崩溃；录像与预览镜像一致需后续用其他方式实现。
-
-  // Check MF_CAPTURE_ENGINE_RECORD_STARTED event handling for response
-  // process.
-  hr = record_handler_->StartRecord(file_path, capture_engine_.Get(),
-                                    base_capture_media_type_.Get());
+  HRESULT hr = record_handler_->StartRecord(file_path, capture_engine_.Get(),
+                                            base_capture_media_type_.Get());
   if (FAILED(hr)) {
-    // Destroy record handler on error cases to make sure state is resetted.
     record_handler_ = nullptr;
     return OnRecordStarted(GetCameraResult(hr),
                            "Failed to start video recording");
@@ -576,13 +577,11 @@ void CaptureControllerImpl::StopRecord() {
                            "disposed and reinitialized.");
   }
 
-  if (!record_handler_ && !record_handler_->CanStop()) {
+  if (!record_handler_ || !record_handler_->CanStop()) {
     return OnRecordStopped(CameraResult::kError,
                            "Recording cannot be stopped.");
   }
 
-  // Check MF_CAPTURE_ENGINE_RECORD_STOPPED event handling for response
-  // process.
   HRESULT hr = record_handler_->StopRecord(capture_engine_.Get());
   if (FAILED(hr)) {
     return OnRecordStopped(GetCameraResult(hr),
@@ -870,13 +869,14 @@ void CaptureControllerImpl::OnRecordStarted(CameraResult result,
 
 // Handles RecordStopped event and informs CaptureControllerListener.
 void CaptureControllerImpl::OnRecordStopped(CameraResult result,
-                                            const std::string& error) {
-  if (capture_controller_listener_ && record_handler_) {
-    // Always calls OnStopRecord listener methods
-    // to handle separate stop record request for timed records.
-
+                                            const std::string& error,
+                                            const std::string& optional_record_path) {
+  if (capture_controller_listener_) {
     if (result == CameraResult::kSuccess) {
-      std::string path = record_handler_->GetRecordPath();
+      std::string path =
+          optional_record_path.empty() && record_handler_
+              ? record_handler_->GetRecordPath()
+              : optional_record_path;
       capture_controller_listener_->OnStopRecordSucceeded(path);
     } else {
       capture_controller_listener_->OnStopRecordFailed(result, error);
@@ -885,9 +885,10 @@ void CaptureControllerImpl::OnRecordStopped(CameraResult result,
 
   if (result == CameraResult::kSuccess && record_handler_) {
     record_handler_->OnRecordStopped();
-  } else {
-    // Destroy record handler on error cases to make sure state is resetted.
-    record_handler_ = nullptr;
+  } else if (!optional_record_path.empty() || result != CameraResult::kSuccess) {
+    if (result != CameraResult::kSuccess) {
+      record_handler_ = nullptr;
+    }
   }
 }
 
@@ -910,9 +911,12 @@ void CaptureControllerImpl::UpdateCaptureTime(uint64_t capture_time_us) {
     return;
   }
 
+  last_capture_time_us_ = capture_time_us;
+  if (record_handler_ && record_handler_->CanStop()) {
+    record_handler_->UpdateRecordingTime(capture_time_us);
+  }
+
   if (preview_handler_ && preview_handler_->IsStarting()) {
-    // Informs that first frame is captured successfully and preview has
-    // started.
     OnPreviewStarted(CameraResult::kSuccess, "");
   }
 }

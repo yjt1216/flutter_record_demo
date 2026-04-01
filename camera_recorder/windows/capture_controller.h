@@ -23,6 +23,7 @@
 #include "messages.g.h"
 #include "photo_handler.h"
 #include "preview_handler.h"
+#include "preview_frame_recorder.h"
 #include "record_handler.h"
 #include "texture_handler.h"
 
@@ -212,7 +213,10 @@ class CaptureControllerImpl : public CaptureController,
   void OnRecordStarted(CameraResult result, const std::string& error);
 
   // Handles record stopped events.
-  void OnRecordStopped(CameraResult result, const std::string& error);
+  // optional_record_path: when non-empty (e.g. software/mirror path), use as
+  // the recorded file path for the listener instead of record_handler_.
+  void OnRecordStopped(CameraResult result, const std::string& error,
+                       const std::string& optional_record_path = "");
 
   bool media_foundation_started_ = false;
 
@@ -220,6 +224,7 @@ class CaptureControllerImpl : public CaptureController,
   uint32_t preview_frame_height_ = 0;
   UINT dx_device_reset_token_ = 0;
   std::unique_ptr<RecordHandler> record_handler_;
+  std::unique_ptr<PreviewFrameRecorder> preview_frame_recorder_;
   std::unique_ptr<PreviewHandler> preview_handler_;
   std::unique_ptr<PhotoHandler> photo_handler_;
   std::unique_ptr<TextureHandler> texture_handler_;
@@ -238,6 +243,7 @@ class CaptureControllerImpl : public CaptureController,
   ComPtr<IMFMediaSource> video_source_;
   ComPtr<IMFMediaSource> audio_source_;
 
+  uint64_t last_capture_time_us_ = 0;
   TextureRegistrar* texture_registrar_ = nullptr;
 };
 

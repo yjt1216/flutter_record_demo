@@ -37,6 +37,8 @@ list(APPEND PLUGIN_SOURCES
   "photo_handler.h"
   "record_handler.cpp"
   "record_handler.h"
+  "preview_frame_recorder.cpp"
+  "preview_frame_recorder.h"
   "capture_engine_listener.cpp"
   "capture_engine_listener.h"
   "string_utils.cpp"
