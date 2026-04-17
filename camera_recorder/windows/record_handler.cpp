@@ -8,12 +8,36 @@
 #include <mfcaptureengine.h>
 
 #include <cassert>
+#include <comdef.h>
+#include <cstdio>
 
 #include "string_utils.h"
 
 namespace camera_windows {
 
 using Microsoft::WRL::ComPtr;
+
+namespace {
+std::string HResultToString(HRESULT hr) {
+  _com_error err(hr);
+  char hex_buf[32] = {0};
+  std::snprintf(hex_buf, sizeof(hex_buf), "0x%08lX",
+                static_cast<unsigned long>(hr));
+  std::string msg = hex_buf;
+  msg.append(" (");
+  msg.append(Utf8FromUtf16(std::wstring(err.ErrorMessage())));
+  msg.append(")");
+  return msg;
+}
+
+void DebugLog(const std::string& msg) {
+  std::string with_newline = msg;
+  with_newline.append("\n");
+  OutputDebugStringA(with_newline.c_str());
+  std::fprintf(stderr, "%s", with_newline.c_str());
+  std::fflush(stderr);
+}
+}  // namespace
 
 // Initializes media type for video capture.
 HRESULT BuildMediaTypeForVideoCapture(IMFMediaType* src_media_type,
@@ -189,11 +213,22 @@ HRESULT RecordHandler::InitRecordSink(IMFCaptureEngine* capture_engine,
   }
 
   DWORD video_record_sink_stream_index;
-  hr = record_sink_->AddStream(
-      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_RECORD,
-      video_record_media_type.Get(), nullptr, &video_record_sink_stream_index);
+  const DWORD kPreferredVideoRecordStream =
+      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_RECORD;
+  hr = record_sink_->AddStream(kPreferredVideoRecordStream,
+                              video_record_media_type.Get(), nullptr,
+                              &video_record_sink_stream_index);
   if (FAILED(hr)) {
-    return hr;
+    DebugLog("RecordHandler: AddStream(video) failed. preferred_stream=" +
+             std::to_string(kPreferredVideoRecordStream) +
+             ", hr=" + HResultToString(hr) + ". Falling back to stream=0.");
+    hr = record_sink_->AddStream(0, video_record_media_type.Get(), nullptr,
+                                &video_record_sink_stream_index);
+    if (FAILED(hr)) {
+      DebugLog("RecordHandler: AddStream(video) failed on fallback stream=0. hr=" +
+               HResultToString(hr));
+      return hr;
+    }
   }
 
   if (media_settings_.enable_audio()) {
@@ -239,11 +274,17 @@ HRESULT RecordHandler::StartRecord(const std::string& file_path,
 
   HRESULT hr = InitRecordSink(capture_engine, base_media_type);
   if (FAILED(hr)) {
+    DebugLog("RecordHandler: InitRecordSink failed. hr=" + HResultToString(hr));
     return hr;
   }
 
   recording_state_ = RecordState::kStarting;
-  return capture_engine->StartRecord();
+  hr = capture_engine->StartRecord();
+  if (FAILED(hr)) {
+    DebugLog("RecordHandler: capture_engine->StartRecord failed. hr=" +
+             HResultToString(hr));
+  }
+  return hr;
 }
 
 HRESULT RecordHandler::StopRecord(IMFCaptureEngine* capture_engine) {

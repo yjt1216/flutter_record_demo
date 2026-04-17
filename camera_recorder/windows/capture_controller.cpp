@@ -606,9 +606,11 @@ void CaptureControllerImpl::StartRecord(const std::string& file_path) {
                            "disposed and reinitialized.");
   }
 
+  DebugLog("StartRecord: enter. path=" + file_path);
   if (!base_preview_media_type_ && !base_capture_media_type_) {
     HRESULT hr = FindBaseMediaTypes();
     if (FAILED(hr)) {
+      DebugLog("StartRecord: FindBaseMediaTypes failed. hr=" + HResultToString(hr));
       return OnRecordStarted(GetCameraResult(hr),
                              "Failed to initialize video recording");
     }
@@ -635,9 +637,12 @@ void CaptureControllerImpl::StartRecord(const std::string& file_path) {
   HRESULT hr = record_handler_->StartRecord(file_path, capture_engine_.Get(),
                                             base_capture_media_type_.Get());
   if (FAILED(hr)) {
+    DebugLog("StartRecord: RecordHandler::StartRecord failed. hr=" +
+             HResultToString(hr));
     record_handler_ = nullptr;
     return OnRecordStarted(GetCameraResult(hr),
-                           "Failed to start video recording");
+                           "Failed to start video recording. hr=" +
+                               HResultToString(hr));
   }
 }
 
