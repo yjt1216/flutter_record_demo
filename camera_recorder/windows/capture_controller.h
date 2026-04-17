@@ -17,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <fstream>
 
 #include "capture_controller_listener.h"
 #include "capture_engine_listener.h"
@@ -245,6 +246,12 @@ class CaptureControllerImpl : public CaptureController,
 
   uint64_t last_capture_time_us_ = 0;
   TextureRegistrar* texture_registrar_ = nullptr;
+
+  // Raw recording (uncompressed frames) support.
+  bool raw_recording_enabled_ = false;
+  bool raw_recording_started_ = false;
+  std::string raw_record_file_path_;
+  std::ofstream raw_record_stream_;
 };
 
 // Inferface for factory classes that create |CaptureController| instances.

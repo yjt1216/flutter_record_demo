@@ -25,7 +25,12 @@ std::string HResultToString(HRESULT hr) {
                 static_cast<unsigned long>(hr));
   std::string msg = hex_buf;
   msg.append(" (");
+#ifdef UNICODE
   msg.append(Utf8FromUtf16(std::wstring(err.ErrorMessage())));
+#else
+  // 非 UNICODE 构建下 ErrorMessage() 为窄字符串，直接附加即可。
+  msg.append(err.ErrorMessage());
+#endif
   msg.append(")");
   return msg;
 }

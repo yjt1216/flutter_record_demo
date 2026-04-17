@@ -10,7 +10,9 @@
 
 #include <cassert>
 #include <chrono>
+#include <cctype>
 #include <cstdio>
+#include <fstream>
 
 #include "com_heap_ptr.h"
 #include "photo_handler.h"
@@ -429,6 +431,21 @@ void DebugLog(const std::string& msg) {
 }
 }  // namespace
 
+namespace {
+bool EndsWithInsensitive(const std::string& value, const std::string& suffix) {
+  if (suffix.size() > value.size()) return false;
+  const size_t offset = value.size() - suffix.size();
+  for (size_t i = 0; i < suffix.size(); i++) {
+    const char a = static_cast<char>(std::tolower(
+        static_cast<unsigned char>(value[offset + i])));
+    const char b = static_cast<char>(
+        std::tolower(static_cast<unsigned char>(suffix[i])));
+    if (a != b) return false;
+  }
+  return true;
+}
+}  // namespace
+
 // Finds best media type for given source stream index and max height;
 bool FindBestMediaType(DWORD source_stream_index, IMFCaptureSource* source,
                        IMFMediaType** target_media_type, uint32_t max_height,
@@ -607,6 +624,59 @@ void CaptureControllerImpl::StartRecord(const std::string& file_path) {
   }
 
   DebugLog("StartRecord: enter. path=" + file_path);
+
+  // Uncompressed raw recording mode:
+  // If file extension is .bgra or .raw, write BGRA32 frames from preview sample
+  // callback directly to the output file (sequential frames). A sidecar JSON
+  // file with metadata is created at "<file_path>.json".
+  const bool wants_raw = EndsWithInsensitive(file_path, ".bgra") ||
+                         EndsWithInsensitive(file_path, ".raw");
+  if (wants_raw) {
+    if (raw_recording_enabled_) {
+      return OnRecordStarted(CameraResult::kError,
+                             "Raw recording already in progress.");
+    }
+    if (!preview_handler_ || !preview_handler_->IsRunning()) {
+      return OnRecordStarted(CameraResult::kError,
+                             "Preview must be running for raw recording.");
+    }
+
+    raw_record_file_path_ = file_path;
+    raw_record_stream_.open(raw_record_file_path_,
+                            std::ios::binary | std::ios::out | std::ios::trunc);
+    if (!raw_record_stream_.is_open()) {
+      raw_record_file_path_.clear();
+      return OnRecordStarted(CameraResult::kError,
+                             "Failed to open raw output file for writing.");
+    }
+
+    // Write metadata file. Stride can be derived by external encoder from the
+    // actual frame byte size; preview is configured as RGB32/BGRA32.
+    {
+      std::ofstream meta(raw_record_file_path_ + ".json",
+                         std::ios::out | std::ios::trunc);
+      if (meta.is_open()) {
+        const int64_t fps = media_settings_.frames_per_second()
+                                ? *media_settings_.frames_per_second()
+                                : 0;
+        meta << "{\n"
+             << "  \"pixel_format\": \"BGRA32\",\n"
+             << "  \"width\": " << preview_frame_width_ << ",\n"
+             << "  \"height\": " << preview_frame_height_ << ",\n"
+             << "  \"fps\": " << fps << ",\n"
+             << "  \"container\": \"raw_frames\",\n"
+             << "  \"notes\": \"Frames are written sequentially; each frame is "
+                "data_length bytes from preview callback.\"\n"
+             << "}\n";
+      }
+    }
+
+    raw_recording_enabled_ = true;
+    raw_recording_started_ = true;
+    DebugLog("StartRecord: raw recording started (BGRA32).");
+    return OnRecordStarted(CameraResult::kSuccess, "");
+  }
+
   if (!base_preview_media_type_ && !base_capture_media_type_) {
     HRESULT hr = FindBaseMediaTypes();
     if (FAILED(hr)) {
@@ -653,6 +723,19 @@ void CaptureControllerImpl::StopRecord() {
     return OnRecordStopped(CameraResult::kError,
                            "Camera not initialized. Camera should be "
                            "disposed and reinitialized.");
+  }
+
+  if (raw_recording_enabled_) {
+    if (raw_record_stream_.is_open()) {
+      raw_record_stream_.flush();
+      raw_record_stream_.close();
+    }
+    const std::string path = raw_record_file_path_;
+    raw_record_file_path_.clear();
+    raw_recording_enabled_ = false;
+    raw_recording_started_ = false;
+    DebugLog("StopRecord: raw recording stopped. path=" + path);
+    return OnRecordStopped(CameraResult::kSuccess, "", path);
   }
 
   if (!record_handler_ || !record_handler_->CanStop()) {
@@ -1011,6 +1094,10 @@ bool CaptureControllerImpl::UpdateBuffer(uint8_t* buffer,
                                          uint32_t data_length) {
   if (!texture_handler_) {
     return false;
+  }
+  if (raw_recording_enabled_ && raw_record_stream_.is_open()) {
+    raw_record_stream_.write(reinterpret_cast<const char*>(buffer),
+                             data_length);
   }
   return texture_handler_->UpdateBuffer(buffer, data_length);
 }
