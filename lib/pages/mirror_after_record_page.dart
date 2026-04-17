@@ -392,8 +392,6 @@ class _MirrorAfterRecordPageState extends State<MirrorAfterRecordPage> {
                 value: _mp4ResolutionPreset,
                 items: const [
                   DropdownMenuItem(
-                      value: ResolutionPreset.high, child: Text('high')),
-                  DropdownMenuItem(
                       value: ResolutionPreset.veryHigh,
                       child: Text('veryHigh')),
                   DropdownMenuItem(

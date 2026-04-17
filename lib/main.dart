@@ -1,4 +1,6 @@
 
+import 'dart:io' show Directory, Platform;
+
 import 'package:camera_recorder/camera_recorder.dart';
 import 'package:flutter/material.dart';
 import 'pages/audio_player_page.dart';
@@ -50,13 +52,26 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _loading = false;
   CameraDescription? _selectedCamera;
   int? _cameraId; // 保存摄像头ID
-  final TextEditingController _pathCtrl = TextEditingController(text: 'D:/VideoFiles/test_direct_save.mp4');
+  final TextEditingController _pathCtrl =
+      TextEditingController(text: 'D:/VideoFiles/test_direct_save.mp4');
   bool _recording = false;
   bool _opened = false;
   double _fps = 30.0;
   int _previewW = 0;
   int _previewH = 0;
   bool _mirrorEnabled = false; // 默认镜像开启
+  int _videoBitrate = 17300000; // 默认接近系统相机 ~17.3Mbps
+  ResolutionPreset _resolutionPreset = ResolutionPreset.veryHigh;
+
+  Future<String> _defaultRecordPath() async {
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    if (Platform.isWindows) {
+      const dir = r'D:\VideoFiles';
+      await Directory(dir).create(recursive: true);
+      return '$dir\\record_$ts.mp4';
+    }
+    return 'record_$ts.mp4';
+  }
 
   @override
   void initState() {
@@ -107,13 +122,13 @@ class _MyHomePageState extends State<MyHomePage> {
       return;
     }
     try {
-      // 使用 CameraPlatform 创建摄像头实例，设置640×480分辨率
+      // 使用 CameraPlatform 创建摄像头实例
       final cameraId = await _cameraPlatform.createCameraWithSettings(
         _selectedCamera!,
         MediaSettings(
-          resolutionPreset: ResolutionPreset.medium, // 或者使用其他预设
+          resolutionPreset: _resolutionPreset,
           fps: 30,
-          videoBitrate: 2000000, // 2Mbps
+          videoBitrate: _videoBitrate,
           enableAudio: false,
         ),
       );
@@ -163,17 +178,14 @@ class _MyHomePageState extends State<MyHomePage> {
       return;
     }
     
-    final path = _pathCtrl.text.trim();
+    var path = _pathCtrl.text.trim();
     if (path.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请输入保存路径')));
-      }
-      return;
+      path = await _defaultRecordPath();
+      if (mounted) setState(() => _pathCtrl.text = path);
     }
     
     try {
       // 使用 CameraPlatform，支持指定路径
-      final path = _pathCtrl.text.trim();
       await _cameraPlatform.startVideoRecording(_cameraId!, filePath: path);
       if (mounted) setState(() { _recording = true; });
       if (mounted) {
@@ -331,6 +343,43 @@ class _MyHomePageState extends State<MyHomePage> {
                   }).toList(),
                   onChanged: (v) => setState(() { _selectedCamera = v; }),
                 ),
+              const SizedBox(height: 12),
+              Wrap(spacing: 12, runSpacing: 8, children: [
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Text('码率: '),
+                  DropdownButton<int>(
+                    value: _videoBitrate,
+                    items: const [
+                      DropdownMenuItem(value: 2000000, child: Text('2 Mbps')),
+                      DropdownMenuItem(value: 8000000, child: Text('8 Mbps')),
+                      DropdownMenuItem(value: 17300000, child: Text('17.3 Mbps')),
+                      DropdownMenuItem(value: 25000000, child: Text('25 Mbps')),
+                    ],
+                    onChanged: (_opened || _recording)
+                        ? null
+                        : (v) => setState(() => _videoBitrate = v ?? _videoBitrate),
+                  ),
+                ]),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Text('分辨率: '),
+                  DropdownButton<ResolutionPreset>(
+                    value: _resolutionPreset,
+                    items: const [
+                      DropdownMenuItem(value: ResolutionPreset.veryHigh, child: Text('veryHigh')),
+                      DropdownMenuItem(value: ResolutionPreset.ultraHigh, child: Text('ultraHigh')),
+                      DropdownMenuItem(value: ResolutionPreset.max, child: Text('max')),
+                    ],
+                    onChanged: (_opened || _recording)
+                        ? null
+                        : (v) => setState(() => _resolutionPreset = v ?? _resolutionPreset),
+                  ),
+                ]),
+                Text(
+                  _opened
+                      ? '提示：修改码率/分辨率需重新打开摄像头'
+                      : '提示：打开前可调整参数',
+                ),
+              ]),
               const SizedBox(height: 12),
               TextField(
                 controller: _pathCtrl,

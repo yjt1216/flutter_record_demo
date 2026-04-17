@@ -49,6 +49,90 @@ flutter run -d windows
 flutter build windows
 ```
 
+## 使用示例
+
+下面示例基于本仓库的 `camera_recorder` 插件（Windows）。
+
+### 1) MP4(H264) 录制（建议高码率，接近系统相机）
+
+> 关键点：**`videoBitrate` 直接影响画质**。系统相机常见 1080p@30fps 约 15–20Mbps；如果用 2Mbps 很容易出现明显的压缩糊/“蒙雾”观感。
+>
+> 经验结论（本项目/部分设备）：**分辨率预设建议至少 `ResolutionPreset.veryHigh`**；`veryHigh` 以下可能出现“蒙雾/发灰/观感变差”。
+
+```dart
+import 'dart:io' show Directory, Platform;
+
+import 'package:camera_recorder/camera_recorder.dart';
+
+final CameraPlatform camera = CameraPlatform.instance;
+
+Future<void> recordMp4HighBitrate() async {
+  final cams = await camera.availableCameras();
+  final id = await camera.createCameraWithSettings(
+    cams.first,
+    MediaSettings(
+      resolutionPreset: ResolutionPreset.veryHigh, // 优先 1080p
+      fps: 30,
+      videoBitrate: 17300000, // 约 17.3Mbps
+      enableAudio: false,
+    ),
+  );
+
+  await camera.initializeCamera(id);
+
+  // 输出到 D:\VideoFiles\record_<timestamp>.mp4
+  final ts = DateTime.now().millisecondsSinceEpoch;
+  final path = Platform.isWindows
+      ? (await Directory(r'D:\VideoFiles').create(recursive: true),
+          r'D:\VideoFiles\record_' + ts.toString() + '.mp4').$2
+      : 'record_$ts.mp4';
+
+  await camera.startVideoRecording(id, filePath: path);
+  // ... wait ...
+  final xfile = await camera.stopVideoRecording(id);
+  print('saved: ${xfile.path}');
+}
+```
+
+### 2) Raw(BGRA) 无压缩录制（交给外部调用者自行编码/压缩）
+
+> 关键点：输出是 **`.bgra/.raw`** 原始帧文件（体积很大），旁边会生成同名 **`.json`** 元信息文件。
+
+```dart
+import 'dart:io' show Directory;
+import 'package:camera_recorder/camera_recorder.dart';
+
+final CameraPlatform camera = CameraPlatform.instance;
+
+Future<void> recordRawBgra() async {
+  final cams = await camera.availableCameras();
+  final id = await camera.createCameraWithSettings(
+    cams.first,
+    const MediaSettings(
+      resolutionPreset: ResolutionPreset.medium,
+      fps: 30,
+      enableAudio: false,
+    ),
+  );
+  await camera.initializeCamera(id);
+
+  await Directory(r'D:\VideoFiles').create(recursive: true);
+  final ts = DateTime.now().millisecondsSinceEpoch;
+  final rawPath = r'D:\VideoFiles\record_' + ts.toString() + '.bgra';
+
+  await camera.startVideoRecording(id, filePath: rawPath); // 触发 Raw 模式
+  // ... wait ...
+  final xfile = await camera.stopVideoRecording(id);
+  print('raw saved: ${xfile.path}');
+  print('meta saved: ${xfile.path}.json');
+}
+```
+
+### 3) Demo 页面
+
+- **首页录像页**：`lib/main.dart`
+- **录后镜像录制页**：`lib/pages/mirror_after_record_page.dart`
+
 ## 项目结构
 
 ```
