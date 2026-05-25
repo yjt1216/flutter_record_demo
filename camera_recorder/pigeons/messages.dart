@@ -88,6 +88,12 @@ abstract class CameraApi {
   /// When [mirror] is true, the preview will be horizontally mirrored.
   @async
   void setMirrorPreview(int cameraId, bool mirror);
+
+  /// Captures the current preview texture frame to a BMP file (same pipeline
+  /// as live preview). Use when [takePicture] fails on UVC devices whose
+  /// photo sink is unavailable.
+  @async
+  String capturePreviewFrame(int cameraId, String filePath);
 }
 
 @FlutterApi()

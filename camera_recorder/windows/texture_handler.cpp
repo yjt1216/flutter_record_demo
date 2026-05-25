@@ -141,4 +141,47 @@ const FlutterDesktopPixelBuffer* TextureHandler::ConvertPixelBufferForFlutter(
   return nullptr;
 }
 
+bool TextureHandler::CopyPreviewFrameBgr(std::vector<uint8_t>* bgr_out,
+                                         uint32_t* width,
+                                         uint32_t* height) {
+  if (!bgr_out || !width || !height) {
+    return false;
+  }
+
+  const std::lock_guard<std::mutex> lock(buffer_mutex_);
+  if (!TextureRegistered() || preview_frame_width_ == 0 ||
+      preview_frame_height_ == 0) {
+    return false;
+  }
+
+  const uint32_t w = preview_frame_width_;
+  const uint32_t h = preview_frame_height_;
+  const uint32_t data_size = w * h * bytes_per_pixel_;
+  if (source_buffer_.size() != data_size) {
+    return false;
+  }
+
+  const MFVideoFormatRGB32Pixel* src =
+      reinterpret_cast<const MFVideoFormatRGB32Pixel*>(source_buffer_.data());
+  bgr_out->resize(static_cast<size_t>(w) * h * 3);
+
+  for (uint32_t y = 0; y < h; y++) {
+    for (uint32_t x = 0; x < w; x++) {
+      const uint32_t sp = (y * w) + x;
+      uint32_t tp = sp;
+      if (mirror_preview_) {
+        tp = (y * w) + ((w - 1) - x);
+      }
+      const size_t bgr_idx = static_cast<size_t>(sp) * 3;
+      (*bgr_out)[bgr_idx] = src[tp].b;
+      (*bgr_out)[bgr_idx + 1] = src[tp].g;
+      (*bgr_out)[bgr_idx + 2] = src[tp].r;
+    }
+  }
+
+  *width = w;
+  *height = h;
+  return true;
+}
+
 }  // namespace camera_windows

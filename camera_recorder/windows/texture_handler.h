@@ -65,6 +65,10 @@ class TextureHandler {
   // Returns user-requested mirror state (for record stream and logic).
   bool GetMirrorPreviewState() const { return mirror_desired_; }
 
+  // Copies the latest preview frame as BGR bytes (mirrors when preview mirror is on).
+  bool CopyPreviewFrameBgr(std::vector<uint8_t>* bgr_out, uint32_t* width,
+                           uint32_t* height);
+
  private:
   // Informs flutter texture registrar of updated texture.
   void OnBufferUpdated();

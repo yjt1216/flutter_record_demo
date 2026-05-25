@@ -226,6 +226,13 @@ class CameraApi {
     int64_t camera_id,
     bool mirror,
     std::function<void(std::optional<FlutterError> reply)> result) = 0;
+  // Captures the current preview texture frame to a BMP file (same pipeline
+  // as live preview). Use when [takePicture] fails on UVC devices whose
+  // photo sink is unavailable.
+  virtual void CapturePreviewFrame(
+    int64_t camera_id,
+    const std::string& file_path,
+    std::function<void(ErrorOr<std::string> reply)> result) = 0;
 
   // The codec used by CameraApi.
   static const flutter::StandardMessageCodec& GetCodec();

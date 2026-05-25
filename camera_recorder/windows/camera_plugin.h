@@ -77,6 +77,10 @@ class CameraPlugin : public flutter::Plugin,
   void StopVideoRecording(
       int64_t camera_id,
       std::function<void(ErrorOr<std::string> reply)> result) override;
+  void CapturePreviewFrame(
+      int64_t camera_id,
+      const std::string& file_path,
+      std::function<void(ErrorOr<std::string> reply)> result) override;
   std::optional<FlutterError> Dispose(int64_t camera_id) override;
 
  private:

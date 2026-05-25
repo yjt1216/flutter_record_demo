@@ -25,6 +25,60 @@ namespace camera_windows {
 
 using Microsoft::WRL::ComPtr;
 
+namespace {
+
+bool WriteBmp24File(const std::string& file_path, const uint8_t* bgr,
+                    uint32_t width, uint32_t height) {
+  if (!bgr || width == 0 || height == 0) {
+    return false;
+  }
+
+  const uint32_t row_stride = ((width * 3 + 3) / 4) * 4;
+  const uint32_t pixel_data_size = row_stride * height;
+  const uint32_t file_size = 54 + pixel_data_size;
+
+  std::vector<uint8_t> buffer(file_size, 0);
+  buffer[0] = 'B';
+  buffer[1] = 'M';
+  auto write_u32 = [&buffer](size_t offset, uint32_t value) {
+    buffer[offset] = static_cast<uint8_t>(value & 0xFF);
+    buffer[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    buffer[offset + 2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+    buffer[offset + 3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+  };
+  write_u32(2, file_size);
+  write_u32(10, 54);
+  write_u32(14, 40);
+  write_u32(18, width);
+  write_u32(22, height);
+  write_u32(26, 1);
+  write_u32(28, 24);
+  write_u32(34, pixel_data_size);
+
+  uint8_t* dst = buffer.data() + 54;
+  for (int32_t y = static_cast<int32_t>(height) - 1; y >= 0; --y) {
+    const uint8_t* src_row = bgr + static_cast<size_t>(y) * width * 3;
+    uint8_t* dst_row = dst + static_cast<size_t>(height - 1 - y) * row_stride;
+    for (uint32_t x = 0; x < width; ++x) {
+      const size_t src_idx = static_cast<size_t>(x) * 3;
+      const size_t dst_idx = static_cast<size_t>(x) * 3;
+      dst_row[dst_idx] = src_row[src_idx];
+      dst_row[dst_idx + 1] = src_row[src_idx + 1];
+      dst_row[dst_idx + 2] = src_row[src_idx + 2];
+    }
+  }
+
+  std::ofstream out(file_path, std::ios::binary);
+  if (!out.is_open()) {
+    return false;
+  }
+  out.write(reinterpret_cast<const char*>(buffer.data()),
+            static_cast<std::streamsize>(buffer.size()));
+  return out.good();
+}
+
+}  // namespace
+
 CameraResult GetCameraResult(HRESULT hr) {
   if (SUCCEEDED(hr)) {
     return CameraResult::kSuccess;
@@ -388,6 +442,21 @@ void CaptureControllerImpl::TakePicture(const std::string& file_path) {
     photo_handler_ = nullptr;
     return OnPicture(GetCameraResult(hr), "Failed to take photo");
   }
+}
+
+bool CaptureControllerImpl::CapturePreviewFrame(const std::string& file_path) {
+  if (!IsInitialized() || !texture_handler_) {
+    return false;
+  }
+
+  std::vector<uint8_t> bgr;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  if (!texture_handler_->CopyPreviewFrameBgr(&bgr, &width, &height)) {
+    return false;
+  }
+
+  return WriteBmp24File(file_path, bgr.data(), width, height);
 }
 
 uint32_t CaptureControllerImpl::GetMaxPreviewHeight() const {

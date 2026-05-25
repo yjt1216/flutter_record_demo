@@ -195,6 +195,14 @@ class CameraWindowsRecorder extends CameraPlatform {
   }
 
   @override
+  Future<XFile> capturePreviewFrame(int cameraId, {String? filePath}) async {
+    final String path =
+        await _hostApi.capturePreviewFrame(cameraId, filePath ?? '');
+
+    return XFile(path);
+  }
+
+  @override
   Future<void> setMirrorPreview(int cameraId, bool mirror) async {
     await _hostApi.setMirrorPreview(cameraId, mirror);
   }

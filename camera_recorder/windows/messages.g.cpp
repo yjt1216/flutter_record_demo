@@ -535,6 +535,41 @@ void CameraApi::SetUp(
       channel.SetMessageHandler(nullptr);
     }
   }
+  {
+    BasicMessageChannel<> channel(binary_messenger, "dev.flutter.pigeon.camera_recorder.CameraApi.capturePreviewFrame" + prepended_suffix, &GetCodec());
+    if (api != nullptr) {
+      channel.SetMessageHandler([api](const EncodableValue& message, const flutter::MessageReply<EncodableValue>& reply) {
+        try {
+          const auto& args = std::get<EncodableList>(message);
+          const auto& encodable_camera_id_arg = args.at(0);
+          if (encodable_camera_id_arg.IsNull()) {
+            reply(WrapError("camera_id_arg unexpectedly null."));
+            return;
+          }
+          const int64_t camera_id_arg = encodable_camera_id_arg.LongValue();
+          const auto& encodable_file_path_arg = args.at(1);
+          if (encodable_file_path_arg.IsNull()) {
+            reply(WrapError("file_path_arg unexpectedly null."));
+            return;
+          }
+          const auto& file_path_arg = std::get<std::string>(encodable_file_path_arg);
+          api->CapturePreviewFrame(camera_id_arg, file_path_arg, [reply](ErrorOr<std::string>&& output) {
+            if (output.has_error()) {
+              reply(WrapError(output.error()));
+              return;
+            }
+            EncodableList wrapped;
+            wrapped.push_back(EncodableValue(std::move(output).TakeValue()));
+            reply(EncodableValue(std::move(wrapped)));
+          });
+        } catch (const std::exception& exception) {
+          reply(WrapError(exception.what()));
+        }
+      });
+    } else {
+      channel.SetMessageHandler(nullptr);
+    }
+  }
 }
 
 EncodableValue CameraApi::WrapError(std::string_view error_message) {

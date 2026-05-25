@@ -31,6 +31,7 @@ using flutter::EncodableValue;
 namespace {
 
 const std::string kPictureCaptureExtension = "jpeg";
+const std::string kPreviewCaptureExtension = "bmp";
 const std::string kVideoCaptureExtension = "mp4";
 
 // Builds CaptureDeviceInfo object from given device holding device name and id.
@@ -98,6 +99,20 @@ std::optional<std::string> GetFilePathForPicture() {
 
   return path + "\\" + "PhotoCapture_" + GetCurrentTimeString() + "." +
          kPictureCaptureExtension;
+}
+
+std::optional<std::string> GetFilePathForPreviewFrame() {
+  ComHeapPtr<wchar_t> known_folder_path;
+  HRESULT hr = SHGetKnownFolderPath(FOLDERID_Pictures, KF_FLAG_CREATE, nullptr,
+                                    &known_folder_path);
+  if (FAILED(hr)) {
+    return std::nullopt;
+  }
+
+  std::string path = Utf8FromUtf16(std::wstring(known_folder_path));
+
+  return path + "\\" + "PreviewCapture_" + GetCurrentTimeString() + "." +
+         kPreviewCaptureExtension;
 }
 
 // Builds file path for video capture.
@@ -381,6 +396,34 @@ void CameraPlugin::TakePicture(
     assert(cc);
     cc->TakePicture(capture_path);
   }
+}
+
+void CameraPlugin::CapturePreviewFrame(
+    int64_t camera_id,
+    const std::string& file_path,
+    std::function<void(ErrorOr<std::string> reply)> result) {
+  auto camera = GetCameraByCameraId(camera_id);
+  if (!camera) {
+    return result(FlutterError("camera_error", "Camera not created"));
+  }
+
+  std::string capture_path = file_path;
+  if (capture_path.empty()) {
+    std::optional<std::string> generated_path = GetFilePathForPreviewFrame();
+    if (!generated_path.has_value()) {
+      return result(FlutterError(
+          "system_error", "Failed to get capture path for preview frame"));
+    }
+    capture_path = std::move(*generated_path);
+  }
+
+  auto cc = camera->GetCaptureController();
+  assert(cc);
+  if (!cc->CapturePreviewFrame(capture_path)) {
+    return result(FlutterError(
+        "camera_error", "Failed to capture preview frame (no frame available)"));
+  }
+  result(capture_path);
 }
 
 std::optional<FlutterError> CameraPlugin::Dispose(int64_t camera_id) {

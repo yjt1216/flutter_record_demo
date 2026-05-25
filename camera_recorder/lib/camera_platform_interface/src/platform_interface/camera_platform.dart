@@ -139,6 +139,13 @@ abstract class CameraPlatform extends PlatformInterface {
     throw UnimplementedError('takePicture() is not implemented.');
   }
 
+  /// Captures the current preview frame (same pipeline as live preview).
+  ///
+  /// Prefer this on Windows when [takePicture] fails on UVC devices.
+  Future<XFile> capturePreviewFrame(int cameraId, {String? filePath}) {
+    throw UnimplementedError('capturePreviewFrame() is not implemented.');
+  }
+
   /// Prepare the capture session for video recording.
   Future<void> prepareForVideoRecording() {
     throw UnimplementedError('prepareForVideoRecording() is not implemented.');

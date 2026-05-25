@@ -97,6 +97,9 @@ class CaptureController {
   // Captures a still photo.
   virtual void TakePicture(const std::string& file_path) = 0;
 
+  // Captures the current preview frame to a BMP file (preview pipeline).
+  virtual bool CapturePreviewFrame(const std::string& file_path) = 0;
+
   // Sets the mirror preview state.
   virtual void SetMirrorPreviewState(bool mirror) = 0;
 };
@@ -131,6 +134,7 @@ class CaptureControllerImpl : public CaptureController,
   void StartRecord(const std::string& file_path) override;
   void StopRecord() override;
   void TakePicture(const std::string& file_path) override;
+  bool CapturePreviewFrame(const std::string& file_path) override;
   void SetMirrorPreviewState(bool mirror) override;
 
   // CaptureEngineObserver
