@@ -127,6 +127,8 @@ class _MyHomePageState extends State<MyHomePage> {
         _selectedCamera!,
         MediaSettings(
           resolutionPreset: _resolutionPreset,
+          videoWidth: 640,
+          videoHeight: 480,
           fps: 30,
           videoBitrate: _videoBitrate,
           enableAudio: false,

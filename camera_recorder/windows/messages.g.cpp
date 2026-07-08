@@ -44,12 +44,16 @@ PlatformMediaSettings::PlatformMediaSettings(
   const int64_t* frames_per_second,
   const int64_t* video_bitrate,
   const int64_t* audio_bitrate,
-  bool enable_audio)
+  bool enable_audio,
+  const int64_t* video_width,
+  const int64_t* video_height)
  : resolution_preset_(resolution_preset),
     frames_per_second_(frames_per_second ? std::optional<int64_t>(*frames_per_second) : std::nullopt),
     video_bitrate_(video_bitrate ? std::optional<int64_t>(*video_bitrate) : std::nullopt),
     audio_bitrate_(audio_bitrate ? std::optional<int64_t>(*audio_bitrate) : std::nullopt),
-    enable_audio_(enable_audio) {}
+    enable_audio_(enable_audio),
+    video_width_(video_width ? std::optional<int64_t>(*video_width) : std::nullopt),
+    video_height_(video_height ? std::optional<int64_t>(*video_height) : std::nullopt) {}
 
 const PlatformResolutionPreset& PlatformMediaSettings::resolution_preset() const {
   return resolution_preset_;
@@ -108,14 +112,42 @@ void PlatformMediaSettings::set_enable_audio(bool value_arg) {
 }
 
 
+const int64_t* PlatformMediaSettings::video_width() const {
+  return video_width_ ? &(*video_width_) : nullptr;
+}
+
+void PlatformMediaSettings::set_video_width(const int64_t* value_arg) {
+  video_width_ = value_arg ? std::optional<int64_t>(*value_arg) : std::nullopt;
+}
+
+void PlatformMediaSettings::set_video_width(int64_t value_arg) {
+  video_width_ = value_arg;
+}
+
+
+const int64_t* PlatformMediaSettings::video_height() const {
+  return video_height_ ? &(*video_height_) : nullptr;
+}
+
+void PlatformMediaSettings::set_video_height(const int64_t* value_arg) {
+  video_height_ = value_arg ? std::optional<int64_t>(*value_arg) : std::nullopt;
+}
+
+void PlatformMediaSettings::set_video_height(int64_t value_arg) {
+  video_height_ = value_arg;
+}
+
+
 EncodableList PlatformMediaSettings::ToEncodableList() const {
   EncodableList list;
-  list.reserve(5);
+  list.reserve(7);
   list.push_back(EncodableValue((int)resolution_preset_));
   list.push_back(frames_per_second_ ? EncodableValue(*frames_per_second_) : EncodableValue());
   list.push_back(video_bitrate_ ? EncodableValue(*video_bitrate_) : EncodableValue());
   list.push_back(audio_bitrate_ ? EncodableValue(*audio_bitrate_) : EncodableValue());
   list.push_back(EncodableValue(enable_audio_));
+  list.push_back(video_width_ ? EncodableValue(*video_width_) : EncodableValue());
+  list.push_back(video_height_ ? EncodableValue(*video_height_) : EncodableValue());
   return list;
 }
 
@@ -134,6 +166,14 @@ PlatformMediaSettings PlatformMediaSettings::FromEncodableList(const EncodableLi
   auto& encodable_audio_bitrate = list[3];
   if (!encodable_audio_bitrate.IsNull()) {
     decoded.set_audio_bitrate(encodable_audio_bitrate.LongValue());
+  }
+  auto& encodable_video_width = list[5];
+  if (!encodable_video_width.IsNull()) {
+    decoded.set_video_width(encodable_video_width.LongValue());
+  }
+  auto& encodable_video_height = list[6];
+  if (!encodable_video_height.IsNull()) {
+    decoded.set_video_height(encodable_video_height.LongValue());
   }
   return decoded;
 }

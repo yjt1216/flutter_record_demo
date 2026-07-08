@@ -23,6 +23,8 @@ class PlatformMediaSettings {
     required this.videoBitrate,
     required this.audioBitrate,
     required this.enableAudio,
+    this.videoWidth,
+    this.videoHeight,
   });
 
   final PlatformResolutionPreset resolutionPreset;
@@ -30,6 +32,10 @@ class PlatformMediaSettings {
   final int? videoBitrate;
   final int? audioBitrate;
   final bool enableAudio;
+
+  /// When both are set, preview and recording prefer this exact size (e.g. 640×480).
+  final int? videoWidth;
+  final int? videoHeight;
 }
 
 /// A representation of a size from the native camera APIs.

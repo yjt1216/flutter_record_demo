@@ -356,6 +356,8 @@ class CameraWindowsRecorder extends CameraPlatform {
       framesPerSecond: settings?.fps,
       videoBitrate: settings?.videoBitrate,
       audioBitrate: settings?.audioBitrate,
+      videoWidth: settings?.videoWidth,
+      videoHeight: settings?.videoHeight,
     );
   }
 

@@ -71,6 +71,22 @@ HRESULT BuildMediaTypeForVideoCapture(IMFMediaType* src_media_type,
   return S_OK;
 }
 
+namespace {
+void ApplyExplicitVideoSizeToRecordType(
+    IMFMediaType* video_record_media_type,
+    const PlatformMediaSettings& media_settings) {
+  if (!video_record_media_type || !media_settings.video_width() ||
+      !media_settings.video_height()) {
+    return;
+  }
+  const UINT32 width =
+      static_cast<UINT32>(*media_settings.video_width());
+  const UINT32 height =
+      static_cast<UINT32>(*media_settings.video_height());
+  MFSetAttributeSize(video_record_media_type, MF_MT_FRAME_SIZE, width, height);
+}
+}  // namespace
+
 // Queries interface object from collection.
 template <class Q>
 HRESULT GetCollectionObject(IMFCollection* pCollection, DWORD index,
@@ -204,6 +220,9 @@ HRESULT RecordHandler::InitRecordSink(IMFCaptureEngine* capture_engine,
   if (FAILED(hr)) {
     return hr;
   }
+
+  ApplyExplicitVideoSizeToRecordType(video_record_media_type.Get(),
+                                     media_settings_);
 
   if (media_settings_.frames_per_second()) {
     assert(*media_settings_.frames_per_second() > 0);

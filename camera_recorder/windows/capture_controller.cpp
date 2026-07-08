@@ -10,8 +10,10 @@
 
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 
 #include "com_heap_ptr.h"
@@ -24,6 +26,16 @@
 namespace camera_windows {
 
 using Microsoft::WRL::ComPtr;
+
+bool FindBestMediaType(DWORD source_stream_index, IMFCaptureSource* source,
+                       IMFMediaType** target_media_type, uint32_t max_height,
+                       uint32_t max_width, uint32_t target_width,
+                       uint32_t target_height, uint32_t* target_frame_width,
+                       uint32_t* target_frame_height,
+                       float minimum_accepted_framerate = 15.f,
+                       float target_framerate = 0.f,
+                       HRESULT* last_enumeration_hr = nullptr,
+                       int* enumerated_type_count = nullptr);
 
 namespace {
 
@@ -478,6 +490,100 @@ uint32_t CaptureControllerImpl::GetMaxPreviewHeight() const {
   }
 }
 
+void CaptureControllerImpl::GetCaptureSizeLimits(
+    uint32_t* max_width, uint32_t* max_height, uint32_t* target_width,
+    uint32_t* target_height) const {
+  assert(max_width && max_height && target_width && target_height);
+  *target_width = 0;
+  *target_height = 0;
+
+  if (media_settings_.video_width() && media_settings_.video_height() &&
+      *media_settings_.video_width() > 0 &&
+      *media_settings_.video_height() > 0) {
+    *target_width = static_cast<uint32_t>(*media_settings_.video_width());
+    *target_height = static_cast<uint32_t>(*media_settings_.video_height());
+    *max_width = *target_width;
+    *max_height = *target_height;
+    return;
+  }
+
+  *max_width = 0xffffffffu;
+  *max_height = GetMaxPreviewHeight();
+}
+
+bool CaptureControllerImpl::HasExplicitVideoSize() const {
+  return media_settings_.video_width() && media_settings_.video_height() &&
+         *media_settings_.video_width() > 0 &&
+         *media_settings_.video_height() > 0;
+}
+
+HRESULT CaptureControllerImpl::AlignCaptureMediaTypeForRecording(
+    IMFCaptureSource* source) {
+  if (!HasExplicitVideoSize() || !source) {
+    return S_OK;
+  }
+
+  const uint32_t target_w =
+      static_cast<uint32_t>(*media_settings_.video_width());
+  const uint32_t target_h =
+      static_cast<uint32_t>(*media_settings_.video_height());
+
+  auto type_matches = [&](IMFMediaType* type) -> bool {
+    if (!type) {
+      return false;
+    }
+    uint32_t w = 0;
+    uint32_t h = 0;
+    return SUCCEEDED(MFGetAttributeSize(type, MF_MT_FRAME_SIZE, &w, &h)) &&
+           w == target_w && h == target_h;
+  };
+
+  if (type_matches(base_capture_media_type_.Get())) {
+    return S_OK;
+  }
+
+  if (type_matches(base_preview_media_type_.Get())) {
+    ComPtr<IMFMediaType> copy;
+    HRESULT hr = MFCreateMediaType(&copy);
+    if (FAILED(hr)) {
+      return hr;
+    }
+    hr = base_preview_media_type_->CopyAllItems(copy.Get());
+    if (FAILED(hr)) {
+      return hr;
+    }
+    base_capture_media_type_ = std::move(copy);
+    return S_OK;
+  }
+
+  uint32_t max_width = 0;
+  uint32_t max_height = 0;
+  uint32_t limit_target_w = 0;
+  uint32_t limit_target_h = 0;
+  GetCaptureSizeLimits(&max_width, &max_height, &limit_target_w,
+                       &limit_target_h);
+
+  const DWORD stream_indices[] = {
+      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_RECORD,
+      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW,
+      0};
+
+  for (DWORD stream_index : stream_indices) {
+    ComPtr<IMFMediaType> candidate;
+    uint32_t frame_w = 0;
+    uint32_t frame_h = 0;
+    if (FindBestMediaType(stream_index, source, candidate.GetAddressOf(),
+                          max_height, max_width, limit_target_w,
+                          limit_target_h, &frame_w, &frame_h) &&
+        frame_w == target_w && frame_h == target_h) {
+      base_capture_media_type_ = std::move(candidate);
+      return S_OK;
+    }
+  }
+
+  return S_OK;
+}
+
 namespace {
 std::string HResultToString(HRESULT hr) {
   _com_error err(hr);
@@ -500,6 +606,30 @@ void DebugLog(const std::string& msg) {
 }
 }  // namespace
 
+HRESULT CaptureControllerImpl::ApplyRecordingDeviceFormat(
+    IMFCaptureSource* source, IMFMediaType* media_type) {
+  if (!source || !media_type) {
+    return E_INVALIDARG;
+  }
+
+  const DWORD stream_indices[] = {
+      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_RECORD,
+      0};
+
+  for (DWORD stream_index : stream_indices) {
+    HRESULT hr = source->SetCurrentDeviceMediaType(stream_index, media_type);
+    if (SUCCEEDED(hr)) {
+      DebugLog("ApplyRecordingDeviceFormat: stream " +
+               std::to_string(stream_index) + " set");
+      return hr;
+    }
+    DebugLog("ApplyRecordingDeviceFormat: stream " +
+             std::to_string(stream_index) +
+             " failed. hr=" + HResultToString(hr));
+  }
+  return E_FAIL;
+}
+
 namespace {
 bool EndsWithInsensitive(const std::string& value, const std::string& suffix) {
   if (suffix.size() > value.size()) return false;
@@ -515,23 +645,30 @@ bool EndsWithInsensitive(const std::string& value, const std::string& suffix) {
 }
 }  // namespace
 
-// Finds best media type for given source stream index and max height;
+// Finds best media type for given source stream index and size limits.
 bool FindBestMediaType(DWORD source_stream_index, IMFCaptureSource* source,
                        IMFMediaType** target_media_type, uint32_t max_height,
-                       uint32_t* target_frame_width,
+                       uint32_t max_width, uint32_t target_width,
+                       uint32_t target_height, uint32_t* target_frame_width,
                        uint32_t* target_frame_height,
-                       float minimum_accepted_framerate = 15.f,
-                       float target_framerate = 0.f,
-                       HRESULT* last_enumeration_hr = nullptr,
-                       int* enumerated_type_count = nullptr) {
+                       float minimum_accepted_framerate,
+                       float target_framerate,
+                       HRESULT* last_enumeration_hr,
+                       int* enumerated_type_count) {
   assert(source);
   ComPtr<IMFMediaType> media_type;
 
   uint32_t best_width = 0;
   uint32_t best_height = 0;
   float best_framerate = 0.f;
+  int64_t best_score = INT64_MIN;
   HRESULT last_hr = S_OK;
   int type_count = 0;
+
+  ComPtr<IMFMediaType> closest_media_type;
+  uint32_t closest_width = 0;
+  uint32_t closest_height = 0;
+  int64_t closest_score = INT64_MIN;
 
   // Loop native media types.
   for (int i = 0;; i++) {
@@ -558,35 +695,70 @@ bool FindBestMediaType(DWORD source_stream_index, IMFCaptureSource* source,
 
     uint32_t frame_width;
     uint32_t frame_height;
-    if (SUCCEEDED(MFGetAttributeSize(media_type.Get(), MF_MT_FRAME_SIZE,
-                                     &frame_width, &frame_height))) {
-      // 检查是否匹配目标帧速率
-      bool is_target_framerate = (target_framerate > 0.f && 
-          abs(frame_rate - target_framerate) < 1.0f); // 允许1fps误差
-      bool is_better_resolution = (frame_height <= max_height &&
-          (best_width < frame_width || best_height < frame_height ||
-           best_framerate < frame_rate));
-      
-      // 优先选择匹配目标帧速率的分辨率
-      if (is_target_framerate && is_better_resolution) {
-        media_type.CopyTo(target_media_type);
-        best_width = frame_width;
-        best_height = frame_height;
-        best_framerate = frame_rate;
-      } else if (is_better_resolution) {
-        // 按原逻辑选择最佳分辨率
-        media_type.CopyTo(target_media_type);
-        best_width = frame_width;
-        best_height = frame_height;
-        best_framerate = frame_rate;
-      } else if (best_width == 0 && best_height == 0) {
-        // 如果没有找到任何匹配的，至少选择一个可用的（回退方案）
-        media_type.CopyTo(target_media_type);
-        best_width = frame_width;
-        best_height = frame_height;
-        best_framerate = frame_rate;
+    if (FAILED(MFGetAttributeSize(media_type.Get(), MF_MT_FRAME_SIZE,
+                                  &frame_width, &frame_height))) {
+      continue;
+    }
+
+    const bool in_bounds =
+        frame_height <= max_height && frame_width <= max_width;
+
+    if (!in_bounds && target_width > 0 && target_height > 0) {
+      const int64_t dw =
+          llabs(static_cast<int64_t>(frame_width) -
+                static_cast<int64_t>(target_width));
+      const int64_t dh =
+          llabs(static_cast<int64_t>(frame_height) -
+                static_cast<int64_t>(target_height));
+      const int64_t score = 500000000LL - dw * 1000000LL - dh * 1000000LL;
+      if (score > closest_score) {
+        closest_score = score;
+        media_type.CopyTo(closest_media_type.GetAddressOf());
+        closest_width = frame_width;
+        closest_height = frame_height;
       }
     }
+
+    if (!in_bounds) {
+      continue;
+    }
+
+    int64_t score = 0;
+    if (target_width > 0 && target_height > 0) {
+      if (frame_width == target_width && frame_height == target_height) {
+        score = 1000000000LL;
+      } else {
+        const int64_t dw =
+            llabs(static_cast<int64_t>(frame_width) -
+                  static_cast<int64_t>(target_width));
+        const int64_t dh =
+            llabs(static_cast<int64_t>(frame_height) -
+                  static_cast<int64_t>(target_height));
+        score = 500000000LL - dw * 1000000LL - dh * 1000000LL;
+      }
+    } else {
+      score = static_cast<int64_t>(frame_width) * frame_height;
+    }
+
+    if (target_framerate > 0.f &&
+        std::fabs(frame_rate - target_framerate) < 1.0f) {
+      score += 10000000LL;
+    }
+    score += static_cast<int64_t>(frame_rate * 1000.f);
+
+    if (score > best_score) {
+      best_score = score;
+      media_type.CopyTo(target_media_type);
+      best_width = frame_width;
+      best_height = frame_height;
+      best_framerate = frame_rate;
+    }
+  }
+
+  if (*target_media_type == nullptr && closest_media_type) {
+    closest_media_type.CopyTo(target_media_type);
+    best_width = closest_width;
+    best_height = closest_height;
   }
 
   if (target_frame_width && target_frame_height) {
@@ -625,16 +797,22 @@ HRESULT CaptureControllerImpl::FindBaseMediaTypesForSource(
     target_fps = static_cast<float>(*media_settings_.frames_per_second());
   }
 
+  uint32_t max_width = 0;
+  uint32_t max_height = 0;
+  uint32_t target_width = 0;
+  uint32_t target_height = 0;
+  GetCaptureSizeLimits(&max_width, &max_height, &target_width, &target_height);
+
   // Find base media type for previewing.
   const DWORD kPreferredPreviewStream =
       (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW;
   HRESULT preview_enum_hr = S_OK;
   int preview_enum_count = 0;
   if (!FindBestMediaType(kPreferredPreviewStream, source,
-                         base_preview_media_type_.GetAddressOf(),
-                         GetMaxPreviewHeight(), &preview_frame_width_,
-                         &preview_frame_height_, 15.0f, target_fps,
-                         &preview_enum_hr, &preview_enum_count)) {
+                         base_preview_media_type_.GetAddressOf(), max_height,
+                         max_width, target_width, target_height,
+                         &preview_frame_width_, &preview_frame_height_, 15.0f,
+                         target_fps, &preview_enum_hr, &preview_enum_count)) {
     // 某些设备/驱动对 “preferred stream” 常量不支持，回退到 stream 0。
     DebugLog("FindBestMediaType(preview) failed. preferred_stream=" +
              std::to_string(kPreferredPreviewStream) +
@@ -643,9 +821,9 @@ HRESULT CaptureControllerImpl::FindBaseMediaTypesForSource(
     preview_enum_hr = S_OK;
     preview_enum_count = 0;
     if (!FindBestMediaType(0, source, base_preview_media_type_.GetAddressOf(),
-                           GetMaxPreviewHeight(), &preview_frame_width_,
-                           &preview_frame_height_, 15.0f, target_fps,
-                           &preview_enum_hr, &preview_enum_count)) {
+                           max_height, max_width, target_width, target_height,
+                           &preview_frame_width_, &preview_frame_height_, 15.0f,
+                           target_fps, &preview_enum_hr, &preview_enum_count)) {
       DebugLog("FindBestMediaType(preview) failed on fallback stream=0. "
                "enumerated_types=" +
                std::to_string(preview_enum_count) +
@@ -660,8 +838,9 @@ HRESULT CaptureControllerImpl::FindBaseMediaTypesForSource(
   HRESULT record_enum_hr = S_OK;
   int record_enum_count = 0;
   if (!FindBestMediaType(kPreferredRecordStream, source,
-                         base_capture_media_type_.GetAddressOf(), 0xffffffff,
-                         nullptr, nullptr, 15.0f, target_fps, &record_enum_hr,
+                         base_capture_media_type_.GetAddressOf(), max_height,
+                         max_width, target_width, target_height, nullptr,
+                         nullptr, 15.0f, target_fps, &record_enum_hr,
                          &record_enum_count)) {
     DebugLog("FindBestMediaType(record) failed. preferred_stream=" +
              std::to_string(kPreferredRecordStream) +
@@ -670,8 +849,9 @@ HRESULT CaptureControllerImpl::FindBaseMediaTypesForSource(
     record_enum_hr = S_OK;
     record_enum_count = 0;
     if (!FindBestMediaType(0, source, base_capture_media_type_.GetAddressOf(),
-                           0xffffffff, nullptr, nullptr, 15.0f, target_fps,
-                           &record_enum_hr, &record_enum_count)) {
+                           max_height, max_width, target_width, target_height,
+                           nullptr, nullptr, 15.0f, target_fps, &record_enum_hr,
+                           &record_enum_count)) {
       DebugLog("FindBestMediaType(record) failed on fallback stream=0. "
                "enumerated_types=" +
                std::to_string(record_enum_count) +
@@ -773,8 +953,51 @@ void CaptureControllerImpl::StartRecord(const std::string& file_path) {
         "first.");
   }
 
-  HRESULT hr = record_handler_->StartRecord(file_path, capture_engine_.Get(),
-                                            base_capture_media_type_.Get());
+  HRESULT hr = S_OK;
+  ComPtr<IMFCaptureSource> source;
+  hr = capture_engine_->GetSource(&source);
+  if (FAILED(hr)) {
+    DebugLog("StartRecord: GetSource failed. hr=" + HResultToString(hr));
+    return OnRecordStarted(GetCameraResult(hr),
+                           "Failed to get capture engine source");
+  }
+
+  hr = AlignCaptureMediaTypeForRecording(source.Get());
+  if (FAILED(hr)) {
+    DebugLog("StartRecord: AlignCaptureMediaTypeForRecording failed. hr=" +
+             HResultToString(hr));
+  }
+
+  IMFMediaType* record_media_type = base_capture_media_type_.Get();
+  if (HasExplicitVideoSize() && base_preview_media_type_) {
+    uint32_t preview_w = 0;
+    uint32_t preview_h = 0;
+    if (SUCCEEDED(MFGetAttributeSize(base_preview_media_type_.Get(),
+                                   MF_MT_FRAME_SIZE, &preview_w, &preview_h)) &&
+        preview_w ==
+            static_cast<uint32_t>(*media_settings_.video_width()) &&
+        preview_h ==
+            static_cast<uint32_t>(*media_settings_.video_height())) {
+      record_media_type = base_preview_media_type_.Get();
+    }
+  }
+
+  hr = ApplyRecordingDeviceFormat(source.Get(), record_media_type);
+  if (FAILED(hr)) {
+    DebugLog("StartRecord: ApplyRecordingDeviceFormat failed. hr=" +
+             HResultToString(hr));
+  }
+
+  uint32_t record_w = 0;
+  uint32_t record_h = 0;
+  if (SUCCEEDED(MFGetAttributeSize(record_media_type, MF_MT_FRAME_SIZE,
+                                   &record_w, &record_h))) {
+    DebugLog("StartRecord: recording with media type " +
+             std::to_string(record_w) + "x" + std::to_string(record_h));
+  }
+
+  hr = record_handler_->StartRecord(file_path, capture_engine_.Get(),
+                                      record_media_type);
   if (FAILED(hr)) {
     DebugLog("StartRecord: RecordHandler::StartRecord failed. hr=" +
              HResultToString(hr));

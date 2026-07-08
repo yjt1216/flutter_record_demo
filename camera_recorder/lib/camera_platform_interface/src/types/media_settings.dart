@@ -19,6 +19,8 @@ class MediaSettings {
     this.videoBitrate,
     this.audioBitrate,
     this.enableAudio = false,
+    this.videoWidth,
+    this.videoHeight,
   }) : assert(fps == null || fps > 0, 'fps must be null or greater than zero'),
        assert(
          videoBitrate == null || videoBitrate > 0,
@@ -27,6 +29,19 @@ class MediaSettings {
        assert(
          audioBitrate == null || audioBitrate > 0,
          'audioBitrate must be null or greater than zero',
+       ),
+       assert(
+         videoWidth == null || videoWidth > 0,
+         'videoWidth must be null or greater than zero',
+       ),
+       assert(
+         videoHeight == null || videoHeight > 0,
+         'videoHeight must be null or greater than zero',
+       ),
+       assert(
+         videoWidth == null && videoHeight == null ||
+             videoWidth != null && videoHeight != null,
+         'videoWidth and videoHeight must both be set or both be null',
        );
 
   /// [ResolutionPreset] affect the quality of video recording and image capture.
@@ -44,6 +59,12 @@ class MediaSettings {
   /// Controls audio presence in recorded video.
   final bool enableAudio;
 
+  /// Target capture width in pixels (must be set together with [videoHeight]).
+  final int? videoWidth;
+
+  /// Target capture height in pixels (must be set together with [videoWidth]).
+  final int? videoHeight;
+
   @override
   bool operator ==(Object other) {
     if (identical(other, this)) {
@@ -57,7 +78,9 @@ class MediaSettings {
         fps == other.fps &&
         videoBitrate == other.videoBitrate &&
         audioBitrate == other.audioBitrate &&
-        enableAudio == other.enableAudio;
+        enableAudio == other.enableAudio &&
+        videoWidth == other.videoWidth &&
+        videoHeight == other.videoHeight;
   }
 
   @override
@@ -67,6 +90,8 @@ class MediaSettings {
     videoBitrate,
     audioBitrate,
     enableAudio,
+    videoWidth,
+    videoHeight,
   );
 
   @override
@@ -76,6 +101,8 @@ class MediaSettings {
         'fps: $fps, '
         'videoBitrate: $videoBitrate, '
         'audioBitrate: $audioBitrate, '
-        'enableAudio: $enableAudio}';
+        'enableAudio: $enableAudio, '
+        'videoWidth: $videoWidth, '
+        'videoHeight: $videoHeight}';
   }
 }

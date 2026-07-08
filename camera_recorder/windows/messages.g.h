@@ -86,7 +86,9 @@ class PlatformMediaSettings {
     const int64_t* frames_per_second,
     const int64_t* video_bitrate,
     const int64_t* audio_bitrate,
-    bool enable_audio);
+    bool enable_audio,
+    const int64_t* video_width,
+    const int64_t* video_height);
 
   const PlatformResolutionPreset& resolution_preset() const;
   void set_resolution_preset(const PlatformResolutionPreset& value_arg);
@@ -106,6 +108,15 @@ class PlatformMediaSettings {
   bool enable_audio() const;
   void set_enable_audio(bool value_arg);
 
+  // When both are set, preview and recording prefer this exact size (e.g. 640×480).
+  const int64_t* video_width() const;
+  void set_video_width(const int64_t* value_arg);
+  void set_video_width(int64_t value_arg);
+
+  const int64_t* video_height() const;
+  void set_video_height(const int64_t* value_arg);
+  void set_video_height(int64_t value_arg);
+
 
  private:
   static PlatformMediaSettings FromEncodableList(const flutter::EncodableList& list);
@@ -119,6 +130,8 @@ class PlatformMediaSettings {
   std::optional<int64_t> video_bitrate_;
   std::optional<int64_t> audio_bitrate_;
   bool enable_audio_;
+  std::optional<int64_t> video_width_;
+  std::optional<int64_t> video_height_;
 
 };
 

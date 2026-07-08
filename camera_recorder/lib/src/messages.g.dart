@@ -46,6 +46,8 @@ class PlatformMediaSettings {
     this.videoBitrate,
     this.audioBitrate,
     required this.enableAudio,
+    this.videoWidth,
+    this.videoHeight,
   });
 
   PlatformResolutionPreset resolutionPreset;
@@ -58,6 +60,11 @@ class PlatformMediaSettings {
 
   bool enableAudio;
 
+  /// When both are set, preview and recording prefer this exact size (e.g. 640×480).
+  int? videoWidth;
+
+  int? videoHeight;
+
   Object encode() {
     return <Object?>[
       resolutionPreset.index,
@@ -65,6 +72,8 @@ class PlatformMediaSettings {
       videoBitrate,
       audioBitrate,
       enableAudio,
+      videoWidth,
+      videoHeight,
     ];
   }
 
@@ -76,6 +85,8 @@ class PlatformMediaSettings {
       videoBitrate: result[2] as int?,
       audioBitrate: result[3] as int?,
       enableAudio: result[4]! as bool,
+      videoWidth: result[5] as int?,
+      videoHeight: result[6] as int?,
     );
   }
 }

@@ -1,9 +1,9 @@
+import 'package:camera_recorder/camera_recorder.dart';
 import 'package:flutter/material.dart';
-import 'dart:async';
-
-import 'package:flutter/services.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  CameraWindowsRecorder.registerWith();
   runApp(const MyApp());
 }
 
@@ -15,35 +15,87 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  String _platformVersion = 'Unknown';
-  static const MethodChannel _channel = MethodChannel('camera_recorder');
+  final CameraWindowsRecorder _recorder = CameraWindowsRecorder();
+  int? _cameraId;
+  String _status = '正在初始化…';
+  bool _isRecording = false;
 
   @override
   void initState() {
     super.initState();
-    initPlatformState();
+    _initCamera();
   }
 
-  // Platform messages are asynchronous, so we initialize in an async method.
-  Future<void> initPlatformState() async {
-    String platformVersion;
-    // Platform messages may fail, so we use a try/catch PlatformException.
-    // We also handle the message potentially returning null.
+  // 初始化摄像头
+  Future<void> _initCamera() async {
     try {
-      platformVersion =
-          await _channel.invokeMethod('getPlatformVersion') ?? 'Unknown platform version';
-    } on PlatformException {
-      platformVersion = 'Failed to get platform version.';
+      final cameras = await _recorder.availableCameras();
+      if (cameras.isEmpty) {
+        setState(() => _status = '未检测到摄像头');
+        return;
+      }
+
+      final cameraId = await _recorder.createCameraWithSettings(
+        cameras.first,
+        const MediaSettings(
+          resolutionPreset: ResolutionPreset.medium,
+          videoWidth: 640,
+          videoHeight: 480,
+          fps: 30,
+          enableAudio: false,
+        ),
+      );
+      await _recorder.initializeCamera(cameraId);
+
+      if (!mounted) return;
+      setState(() {
+        _cameraId = cameraId;
+        _status = '已就绪：${cameras.first.name}（640×480 直录）';
+      });
+    } on CameraException catch (e) {
+      if (!mounted) return;
+      setState(() => _status = '摄像头错误：${e.description ?? e.code}');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = '初始化失败：$e');
     }
+  }
 
-    // If the widget was removed from the tree while the asynchronous platform
-    // message was in flight, we want to discard the reply rather than calling
-    // setState to update our non-existent appearance.
-    if (!mounted) return;
+  Future<void> _toggleRecording() async {
+    final cameraId = _cameraId;
+    if (cameraId == null) return;
 
-    setState(() {
-      _platformVersion = platformVersion;
-    });
+    try {
+      if (_isRecording) {
+        final file = await _recorder.stopVideoRecording(cameraId);
+        if (!mounted) return;
+        setState(() {
+          _isRecording = false;
+          _status = '录像已保存：${file.path}';
+        });
+      } else {
+        final path =
+            'D:/VideoFiles/recording_${DateTime.now().millisecondsSinceEpoch}.mp4';
+        await _recorder.startVideoRecording(cameraId, filePath: path);
+        if (!mounted) return;
+        setState(() {
+          _isRecording = true;
+          _status = '录制中（640×480）…';
+        });
+      }
+    } on CameraException catch (e) {
+      if (!mounted) return;
+      setState(() => _status = '录制失败：${e.description ?? e.code}');
+    }
+  }
+
+  @override
+  void dispose() {
+    final cameraId = _cameraId;
+    if (cameraId != null) {
+      _recorder.dispose(cameraId);
+    }
+    super.dispose();
   }
 
   @override
@@ -51,10 +103,30 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       home: Scaffold(
         appBar: AppBar(
-          title: const Text('Plugin example app'),
+          title: const Text('Camera Recorder Example'),
         ),
-        body: Center(
-          child: Text('Running on: $_platformVersion\n'),
+        body: Column(
+          children: [
+            Expanded(
+              child: _cameraId != null
+                  ? _recorder.buildPreview(_cameraId!)
+                  : Center(child: Text(_status)),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Text(_status, textAlign: TextAlign.center),
+                  const SizedBox(height: 12),
+                  if (_cameraId != null)
+                    ElevatedButton(
+                      onPressed: _toggleRecording,
+                      child: Text(_isRecording ? '停止录制' : '开始录制'),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

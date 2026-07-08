@@ -174,6 +174,18 @@ class CaptureControllerImpl : public CaptureController,
   // Returns max preview height calculated from resolution present.
   uint32_t GetMaxPreviewHeight() const;
 
+  // Max width/height and optional exact target for preview and recording.
+  void GetCaptureSizeLimits(uint32_t* max_width, uint32_t* max_height,
+                            uint32_t* target_width,
+                            uint32_t* target_height) const;
+
+  bool HasExplicitVideoSize() const;
+
+  HRESULT AlignCaptureMediaTypeForRecording(IMFCaptureSource* source);
+
+  HRESULT ApplyRecordingDeviceFormat(IMFCaptureSource* source,
+                                     IMFMediaType* media_type);
+
   // Uses first audio source to capture audio.
   // Note: Enumerating audio sources via platform interface is not supported.
   HRESULT CreateDefaultAudioCaptureSource();
