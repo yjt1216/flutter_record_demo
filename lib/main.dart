@@ -367,6 +367,8 @@ class _MyHomePageState extends State<MyHomePage> {
                   DropdownButton<ResolutionPreset>(
                     value: _resolutionPreset,
                     items: const [
+                      DropdownMenuItem(value: ResolutionPreset.medium, child: Text('medium')),
+                      DropdownMenuItem(value: ResolutionPreset.high, child: Text('high')),
                       DropdownMenuItem(value: ResolutionPreset.veryHigh, child: Text('veryHigh')),
                       DropdownMenuItem(value: ResolutionPreset.ultraHigh, child: Text('ultraHigh')),
                       DropdownMenuItem(value: ResolutionPreset.max, child: Text('max')),
